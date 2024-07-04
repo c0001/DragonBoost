@@ -1,6 +1,6 @@
 #!/system/bin/sh
 MODDIR=${0%/*}
-# Menulis data ke dalam berkas (file) jika berkas ada dan izin menulis sudah ada atau belum ada, 
+# Menulis data ke dalam berkas (file) jika berkas ada dan izin menulis sudah ada atau belum ada,
 # memberikan izin menulis jika belum ada, dan kemudian data ditulis ke dalam berkas tersebut.
 
 # perbaikan dari commit @RiProG
@@ -40,7 +40,7 @@ write() {
 
 
 sleep 20
-# adreno snapshot 
+# adreno snapshot
 echo "0" > /sys/class/kgsl/kgsl-3d0/snapshot/snapshot_crashdumper
 echo "0" > /sys/class/kgsl/kgsl-3d0/snapshot/dump
 echo "0" > /sys/class/kgsl/kgsl-3d0/snapshot/force_panic
@@ -61,7 +61,7 @@ for gov in /sys/devices/system/cpu/*/cpufreq
     echo "1" > $gov/schedutil/pl
     echo "0" > $gov/schedutil/iowait_boost_enable
   done
-  
+
 for rcct in /sys/devices/system/cpu/*/core_ctl
 do
   chmod 666 $rcct/enable
@@ -148,4 +148,76 @@ sleep 20
 
 su -lp 2000 -c "cmd notification post -S bigtext -t 'DragonBoost' 'Tag' 'DragonBoost Successfully Installed, Have Fun Boost Your Game!!!'" > /dev/null 2>&1
 
-exit 0
+# kill syslag daemon (for those made high cpu/io etc.)
+__msg () {
+    su -lp 2000 -c "\
+cmd notification post -S bigtext -t 'DragonBoost_SysLagKiller' 'Tag' '$1'" > /dev/null 2>&1
+}
+__msg "Starting system lag proc killer daemon ..."
+killcnt=0
+killindex=0
+killinterval=55
+smallkillinterval=5
+set --
+while sleep $smallkillinterval ; do
+
+    # NOTE: 'media.codec' may made random high cpu to drain the
+    # battery, to avoid it try to disable all app in miui video_tools
+    # setting or fully disable miui optimization may solve this issue
+    # (see: https://www.bilibili.com/read/cv9941912/)
+
+#     for i in 'media.codec' ; do
+#       tmpid="$(pidof "$i")"
+#       if [ $? = '0' ] ; then
+#           if kill -9 $tmpid ; then
+#               __msg "\
+# kill syslag proc '${i}' (pid: ${tmpid}) done. (the ${killcnt}th query turn of interval ${killinterval})"
+#           fi
+#       fi
+#     done
+
+    sleep $killinterval
+
+    # display locking status check method grabed via
+    # https://android.stackexchange.com/questions/191086/adb-commands-to-get-screen-state-and-locked-state
+    if { dumpsys window | grep mDreamingLockscreen=true; }
+    then
+        # if pidof logd ; then stop logd ; fi
+        # # stop MIUI telemetry
+        # for i in \
+            #     'com.miui.securitycore.remote' \
+            #   'com.miui.guardprovider' \
+            #   'com.miui.greenguard'
+        # do
+        #     if pidof "$i" ; then
+        #       am force-stop "$i"
+        #     fi
+        # done
+
+        for i in 'com.miui.guardprovider' 'com.miui.securitycore.remote'
+        do
+            killindex=$(( killindex + 1 ))
+            if [ $(eval "echo \$__tmpvar_${killindex}") != '1' ] ; then
+                tmpid="$(pidof "$i")"
+                # NOTE: the pid can be list of pids so that we should
+                # not quote the result in use.
+                if [ $? = '0' ] ; then
+                    if kill -9 $tmpid ; then
+                        :
+                        # __msg "kill syslag proc '${i}' (pid: ${tmpid}) done. (the ${killcnt}th query turn of interval ${killinterval})"
+                    fi
+                    eval "__tmpvar_${killindex}=1"
+                else
+                    eval "__tmpvar_${killindex}=0"
+                fi
+            fi
+        done
+        killcnt=$(( killcnt + 1 ))
+    else
+        killcnt=0
+        killindex=0
+        for i in 1 2 3 4 5 6 7 8 9 10 ; do
+            eval "__tmpvar_${i}=0"
+        done
+    fi
+done
